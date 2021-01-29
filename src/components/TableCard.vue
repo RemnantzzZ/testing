@@ -14,21 +14,13 @@
           <a-card>
           <div class="tabBox">
            <a-tabs default-active-key="1">
-              <a-tab-pane key="1" tab="零件借用率">
+              <a-tab-pane v-for="(item,index) in refName" :key="index" :tab="item.name">
                 <a-table 
                 :columns="columns" 
-                :data-source="tableData" 
+                :data-source="refCount[item.ename.toLowerCase()]" 
                 :scroll="{y:380}"
                 :pagination="false"
-                >
-                </a-table>
-              </a-tab-pane>
-              <a-tab-pane key="2" tab="图纸借用率" force-render>
-                <a-table 
-                :columns="columns" 
-                :data-source="tableData" 
-                :scroll="{y:380}"
-                :pagination="false"
+                :rowKey="(record,index)=>{return index}"
                 >
                 </a-table>
               </a-tab-pane>
@@ -65,21 +57,41 @@
 
 <script>
 const tableData=[]
-for(let i=1; i<11; i++){
-  tableData.push({
-    key:i,
-    rank:i,
-    name:`X32泵${i}`,
-    count:i
-  })
-}
+import {count, globalParam,increased,wfCount,passRateOfWf,referenceCount} from '../utils/http'
 export default {
+   created(){
+    this.tableCard()
+     
+  },
   data(){
     return{
+      loading: false,
+      globalParam: {},
+      increased: {},
+      increasedClasses: [],
+      refClasses: [],
+      wfTemplates: {},
+      refCount: {},
+      lineData: [],
+   
+      columnsData: {},
+      donutData: [],
+      refName:[
+        {
+          key:"1",
+          ename:"Part",
+          name:"零件借用率"
+        },
+        {
+          key:"2",
+          ename:"Drawing",
+          name:"图纸借用率"
+        }
+      ],
       columns:[
         {
           title:'排名',
-          dataIndex:'rank',
+          dataIndex:'index',
           width:30,
           align:'center'
         },
@@ -107,7 +119,7 @@ export default {
         },
         xAxis: {
           type:'category',
-          data: ["2020/12","2021/1"],
+          data: [],
           axisTick: {
             show: false, 
           },
@@ -125,34 +137,131 @@ export default {
           {
             name:'产品',
             type: "line",
-            data: [1,0.4]
+            data: []
           },
           {
             name:'零件',
             type: "line",
-            data: [1,0.12],
+            data: []
           },
           {
             name:'图纸',
             type: "line",
-            data: [1,0.2]
+            data: []
           },
           {
             name:'文档',
             type: "line",
-            data: [1,0.7]
+            data: []
           }
         ],
       }
     }
   },
   mounted() {
-    this.$nextTick(function () {
-      this.drawLine();
-    });
+    
+   
   },
   methods: {
+    
+      
+    
+    async tableCard(){
+      //获取全局参数
+      
+      this.globalParam = await globalParam()
+      if (this.globalParam === undefined) {
+        return
+      }
+      if (this.globalParam && this.globalParam.QUERY_INCREASED_CLASS) {
+        let queryClasses = this.globalParam.QUERY_INCREASED_CLASS.split('|')
+        this.increasedClasses = queryClasses.map(item => item.toLowerCase())
+        this.refClasses = this.globalParam.QUERY_REFERENCE_CLASS_NAME.split('|')
+      }
+      //获取借用率
+      const refCounts = await referenceCount(this.refClasses)
+      
+      Object.keys(refCounts).forEach(key => {
+        if (key !== 'PartRefRate' && key !== 'DocRefRate') {
+          this.$set(this.refCount, key.toLowerCase(), [])
+          this.refCount[key.toLowerCase()] = []
+          const refItem = refCounts[key]
+          const keyLower = key.toLowerCase()
+          Object.keys(refItem).forEach((item, index) => {
+            const obj = {}
+            obj.name = item
+            obj.count = refItem[item]
+            this.refCount[keyLower].push(obj)
+          })
+          this.refCount[keyLower].sort((a, b) => {
+            return b.count - a.count
+          })
+          for (let i = 0; i < this.refCount[keyLower].length; i++) {
+            this.refCount[keyLower][i].index = i + 1
+          }
+        }
+      })
+      this.refClasses.forEach(item => {
+        if (!(item.toLowerCase() in this.refCount)) {
+          this.$set(this.refCount, item.toLowerCase(), [])
+        }
+      })
+      //获取增长数和增长率
+       if (this.increasedClasses.length > 0 && this.increasedClasses[0] !== '') {
+        this.increased = await increased(this.increasedClasses)
+        this.increasedClasses.forEach(item => {
+          this.$set(this.columnsData, item.toLowerCase(), [])
+          this.lineData.push({
+            name: `line.${item}`
+          })
+        })
+        const keys = Object.keys(this.increased)
+        for (let i = 0; i < keys.length; ++i) {
+          const key = keys[i]
+          const arr = this.increased[key]
+          
+          if (this.increasedClasses.includes(key.toLowerCase())) {
+            arr.forEach(item => {
+              this.lineData.push({
+                name: `line.${key.toLowerCase()}`,
+                year: item.year,
+                month: item.month,
+                date: `${item.year}/${item.month}`,
+                //type: this.$t(`line.${key.toLowerCase()}`),
+                value: item.rate
+              })
+              
+              const obj = {}
+              obj.date = `${item.year}/${item.month}`
+              if (typeof item.count === 'string') {
+                obj.value = Number(item.count)
+              } else {
+                obj.value = item.count
+              }
+              this.columnsData[key.toLowerCase()].push(obj)
+            })
+          }
+        }
+        
+        this.lineData.sort((a, b) => {
+          return a.year - b.year || a.month - b.month
+        })
+        this.$nextTick(function () {
+      this.drawLine();
+    });
+        let lineData=JSON.parse(JSON.stringify(this.lineData))
+         
+         this.areaBoxa.xAxis.data.push(lineData[4].date,lineData[8].date)
+         this.areaBoxa.series[1].data.push(lineData[5].value,lineData[8].value)
+         this.areaBoxa.series[0].data.push(lineData[4].value)
+         this.areaBoxa.series[2].data.push(lineData[6].value)
+         this.areaBoxa.series[3].data.push(lineData[7].value)
+      }
+      this.loading = false
+        
+    },
     drawLine() {
+      
       let lineChart = this.$echarts.init(this.$refs["lineChart"]);
       lineChart.setOption(this.areaBoxa);
       window.addEventListener("resize",function(){
@@ -162,3 +271,4 @@ export default {
   },
 };
 </script>
+
